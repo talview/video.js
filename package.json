@@ -85,8 +85,9 @@
     "url": "https://github.com/videojs/video.js.git"
   },
   "dependencies": {
+
     "@babel/runtime": "^7.12.5",
-    "@videojs/http-streaming": "3.0.0",
+    "@videojs/http-streaming": "git+https://github.com/talview/http-streaming.git#task/live-delay",
     "@videojs/vhs-utils": "^4.0.0",
     "@videojs/xhr": "2.6.0",
     "aes-decrypter": "^4.0.1",
@@ -109,7 +110,7 @@
     "access-sniff": "^3.2.0",
     "autoprefixer": "^10.2.5",
     "bestzip": "^2.2.0",
-    "browserify": "^16.2.3",
+    "browserify": "^16.2.3"
     "chokidar-cli": "^2.1.0",
     "clean-css-cli": "^4.3.0",
     "cli-table": "^0.3.1",
@@ -165,7 +166,7 @@
     "videojs-generate-karma-config": "^8.0.1",
     "videojs-languages": "^2.0.0",
     "videojs-standard": "^9.0.1",
-    "webpack": "^1.15.0"
+    "webpack": "^5.75.0"
   },
   "vjsstandard": {
     "ignore": [
