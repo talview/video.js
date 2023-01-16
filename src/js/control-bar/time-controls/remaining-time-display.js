@@ -23,7 +23,7 @@ class RemainingTimeDisplay extends TimeDisplay {
    */
   constructor(player, options) {
     super(player, options);
-    this.on(player, 'durationchange', this.updateContent);
+    this.on(player, 'durationchange', (e) => this.updateContent(e));
   }
 
   /**
@@ -45,7 +45,9 @@ class RemainingTimeDisplay extends TimeDisplay {
   createEl() {
     const el = super.createEl();
 
-    el.insertBefore(Dom.createEl('span', {}, {'aria-hidden': true}, '-'), this.contentEl_);
+    if (this.options_.displayNegative !== false) {
+      el.insertBefore(Dom.createEl('span', {}, {'aria-hidden': true}, '-'), this.contentEl_);
+    }
     return el;
   }
 
@@ -91,7 +93,7 @@ RemainingTimeDisplay.prototype.labelText_ = 'Remaining Time';
  * The text that should display over the `RemainingTimeDisplay`s controls. Added to for localization.
  *
  * @type {string}
- * @private
+ * @protected
  *
  * @deprecated in v7; controlText_ is not used in non-active display Components
  */

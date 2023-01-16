@@ -11,7 +11,19 @@ import _ from 'lodash';
 import pkg from './package.json';
 import multiEntry from 'rollup-plugin-multi-entry';
 import stub from 'rollup-plugin-stub';
+import isCI from 'is-ci';
+import replace from '@rollup/plugin-replace';
+import istanbul from 'rollup-plugin-istanbul';
+import externalGlobals from 'rollup-plugin-external-globals';
 
+const excludeCoverage = [
+  'test/**',
+  'node_modules/**',
+  'package.json',
+  /^data-files!/
+];
+
+const CI_TEST_TYPE = process.env.CI_TEST_TYPE || '';
 const compiledLicense = _.template(fs.readFileSync('./build/license-header.txt', 'utf8'));
 const bannerData = _.pick(pkg, ['version', 'copyright']);
 const banner = compiledLicense(Object.assign({includesVtt: true}, bannerData));
@@ -45,19 +57,37 @@ const primedBabel = babel({
   compact: false,
   presets: [
     ['@babel/preset-env', {
+      targets: [
+        'last 3 major versions',
+        'Firefox ESR',
+        // This ensures support for certain smart TVs (ex. LG WebOS 4)
+        'Chrome >= 53',
+        'not dead',
+        'not ie 11',
+        'not baidu 7',
+        'not and_qq 11',
+        'not and_uc 12',
+        'not kaios 2',
+        'not op_mini all',
+        'not op_mob 64'
+      ],
       bugfixes: true,
       loose: true,
       modules: false
     }]
   ],
   plugins: [
-    '@babel/plugin-transform-object-assign',
     ['@babel/plugin-transform-runtime', {regenerator: false}]
   ]
 });
+const primedExternalGlobals = externalGlobals({
+  'global': 'window',
+  'global/window': 'window',
+  'global/document': 'document'
+});
 
 const progress = () => {
-  if (process.env.TRAVIS || process.env.NETLIFY) {
+  if (isCI) {
     return {};
   }
 
@@ -66,9 +96,6 @@ const progress = () => {
 
 const globals = {
   browser: {
-    'global': 'window',
-    'global/window': 'window',
-    'global/document': 'document'
   },
   module: {
   },
@@ -93,8 +120,7 @@ const moduleExternals = [
   '@babel/runtime'
 ];
 const externals = {
-  browser: Object.keys(globals.browser).concat([
-  ]),
+  browser: [],
   module(id) {
     const result = moduleExternals.some((ext) => id.indexOf(ext) !== -1);
 
@@ -122,9 +148,61 @@ export default cliargs => [
       }),
       primedResolve,
       json(),
+      primedExternalGlobals,
       primedCjs,
       primedBabel,
       cliargs.progress !== false ? progress() : {}
+    ],
+    onwarn,
+    watch
+  },
+  // debug umd file
+  {
+    input: 'src/js/debug.js',
+    output: {
+      format: 'umd',
+      file: 'dist/alt/video.debug.js',
+      name: 'videojs',
+      banner,
+      globals: globals.browser
+    },
+    external: externals.browser,
+    plugins: [
+      alias({
+        'video.js': path.resolve(__dirname, './src/js/video.js')
+      }),
+      primedResolve,
+      json(),
+      primedExternalGlobals,
+      primedCjs,
+      primedBabel,
+      cliargs.progress !== false ? progress() : {}
+    ],
+    onwarn,
+    watch
+  },
+  {
+    input: 'test/unit/**/*.test.js',
+    output: {
+      format: 'iife',
+      name: 'videojsTests',
+      file: 'test/dist/bundle.js',
+      globals: globals.test
+    },
+    external: externals.test,
+    plugins: [
+      multiEntry({exports: false}),
+      alias({
+        'video.js': path.resolve(__dirname, './src/js/video.js')
+      }),
+      primedResolve,
+      json(),
+      stub(),
+      primedCjs,
+      CI_TEST_TYPE === 'coverage' ? istanbul({exclude: excludeCoverage}) : {},
+      primedBabel,
+      cliargs.progress !== false ? progress() : {}
+
     ],
     onwarn,
     watch
@@ -149,7 +227,14 @@ export default cliargs => [
     plugins: [
       alias({
         'video.js': path.resolve(__dirname, './src/js/video.js'),
+        'videojs-contrib-quality-levels': path.resolve(__dirname, './node_modules/videojs-contrib-quality-levels/dist/videojs-contrib-quality-levels.es.js'),
         '@videojs/http-streaming': path.resolve(__dirname, './node_modules/@videojs/http-streaming/dist/videojs-http-streaming.es.js')
+      }),
+      replace({
+        // single quote replace
+        "require('@videojs/vhs-utils/es": "require('@videojs/vhs-utils/cjs",
+        // double quote replace
+        'require("@videojs/vhs-utils/es': 'require("@videojs/vhs-utils/cjs'
       }),
       json(),
       primedBabel,
@@ -176,6 +261,7 @@ export default cliargs => [
       }),
       primedResolve,
       json(),
+      primedExternalGlobals,
       primedCjs,
       primedBabel,
       cliargs.progress !== false ? progress() : {}
@@ -222,6 +308,7 @@ export default cliargs => [
     plugins: [
       primedResolve,
       json(),
+      primedExternalGlobals,
       primedCjs,
       primedBabel,
       cliargs.progress !== false ? progress() : {}
@@ -244,30 +331,7 @@ export default cliargs => [
       primedIgnore,
       primedResolve,
       json(),
-      primedCjs,
-      primedBabel,
-      cliargs.progress !== false ? progress() : {}
-    ],
-    onwarn,
-    watch
-  },
-  {
-    input: 'test/unit/**/*.test.js',
-    output: {
-      format: 'iife',
-      name: 'videojsTests',
-      file: 'test/dist/bundle.js',
-      globals: globals.test
-    },
-    external: externals.test,
-    plugins: [
-      multiEntry({exports: false}),
-      alias({
-        'video.js': path.resolve(__dirname, './src/js/video.js')
-      }),
-      primedResolve,
-      json(),
-      stub(),
+      primedExternalGlobals,
       primedCjs,
       primedBabel,
       cliargs.progress !== false ? progress() : {}
@@ -275,5 +339,4 @@ export default cliargs => [
     onwarn,
     watch
   }
-
 ];

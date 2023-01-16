@@ -4,7 +4,6 @@
 import Component from '../component.js';
 import document from 'global/document';
 import * as Dom from '../utils/dom.js';
-import * as Fn from '../utils/fn.js';
 import * as Events from '../utils/events.js';
 import keycode from 'keycode';
 
@@ -35,11 +34,11 @@ class Menu extends Component {
 
     this.focusedChild_ = -1;
 
-    this.on('keydown', this.handleKeyDown);
+    this.on('keydown', (e) => this.handleKeyDown(e));
 
     // All the menu item instances share the same blur handler provided by the menu container.
-    this.boundHandleBlur_ = Fn.bind(this, this.handleBlur);
-    this.boundHandleTapClick_ = Fn.bind(this, this.handleTapClick);
+    this.boundHandleBlur_ = (e) => this.handleBlur(e);
+    this.boundHandleTapClick_ = (e) => this.handleTapClick(e);
   }
 
   /**
@@ -259,8 +258,7 @@ class Menu extends Component {
    */
   focus(item = 0) {
     const children = this.children().slice();
-    const haveTitle = children.length && children[0].className &&
-      (/vjs-menu-title/).test(children[0].className);
+    const haveTitle = children.length && children[0].hasClass('vjs-menu-title');
 
     if (haveTitle) {
       children.shift();

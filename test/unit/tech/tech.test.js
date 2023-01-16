@@ -2,8 +2,7 @@
 import Tech from '../../../src/js/tech/tech.js';
 import Html5 from '../../../src/js/tech/html5.js';
 import Button from '../../../src/js/button.js';
-import { createTimeRange } from '../../../src/js/utils/time-ranges.js';
-import extend from '../../../src/js/extend.js';
+import { createTimeRange } from '../../../src/js/utils/time.js';
 import MediaError from '../../../src/js/media-error.js';
 import AudioTrack from '../../../src/js/tracks/audio-track';
 import VideoTrack from '../../../src/js/tracks/video-track';
@@ -13,6 +12,7 @@ import VideoTrackList from '../../../src/js/tracks/video-track-list';
 import TextTrackList from '../../../src/js/tracks/text-track-list';
 import sinon from 'sinon';
 import log from '../../../src/js/utils/log.js';
+import TestHelpers from '../test-helpers.js';
 
 function stubbedSourceHandler(handler) {
   return {
@@ -42,7 +42,7 @@ QUnit.module('Media Tech', {
 });
 
 QUnit.test('Tech.registerTech and Tech.getTech', function(assert) {
-  const MyTech = extend(Tech);
+  class MyTech extends Tech {}
   const oldTechs = Tech.techs_;
   const oldDefaultTechOrder = Tech.defaultTechOrder_;
 
@@ -141,8 +141,9 @@ QUnit.test('dispose() should stop time tracking', function(assert) {
 QUnit.test('dispose() should clear all tracks that are passed when its created', function(assert) {
   const audioTracks = new AudioTrackList([new AudioTrack(), new AudioTrack()]);
   const videoTracks = new VideoTrackList([new VideoTrack(), new VideoTrack()]);
-  const textTracks = new TextTrackList([new TextTrack({tech: {}}),
-    new TextTrack({tech: {}})]);
+  const pretech = new Tech();
+  const textTracks = new TextTrackList([new TextTrack({tech: pretech}),
+    new TextTrack({tech: pretech})]);
 
   assert.equal(audioTracks.length, 2, 'should have two audio tracks at the start');
   assert.equal(videoTracks.length, 2, 'should have two video tracks at the start');
@@ -166,6 +167,7 @@ QUnit.test('dispose() should clear all tracks that are passed when its created',
     'should hold text tracks that we passed'
   );
 
+  pretech.dispose();
   tech.dispose();
 
   assert.equal(audioTracks.length, 0, 'should have zero audio tracks after dispose');
@@ -216,17 +218,11 @@ QUnit.test('dispose() should clear all tracks that are added after creation', fu
   assert.equal(tech.textTracks().length, 0, 'should have zero video tracks after dispose');
 });
 
-QUnit.test('switching sources should clear all remote tracks that are added with manualCleanup = false', function(assert) {
-
+QUnit.test('switching sources should clear all remote tracks that are added with the default manualCleanup = false', function(assert) {
   const oldLogWarn = log.warn;
-  let warning;
-
-  log.warn = function(wrning) {
-    warning = wrning;
-  };
 
   // Define a new tech class
-  const MyTech = extend(Tech);
+  class MyTech extends Tech {}
 
   // Create source handler
   const handler = {
@@ -251,18 +247,10 @@ QUnit.test('switching sources should clear all remote tracks that are added with
   // set the initial source
   tech.setSource({src: 'foo.mp4', type: 'mp4'});
 
-  // default value for manualCleanup is true
-  tech.addRemoteTextTrack({});
-  this.clock.tick(1);
-
-  assert.equal(
-    warning,
-    'Calling addRemoteTextTrack without explicitly setting the "manualCleanup" parameter to `true` is deprecated and default to `false` in future version of video.js',
-    'we log a warning when `addRemoteTextTrack` is called without a manualCleanup argument'
-  );
-
+  // should not be automatically cleaned up when source changes
+  tech.addRemoteTextTrack({}, true);
   // should be automatically cleaned up when source changes
-  tech.addRemoteTextTrack({}, false);
+  tech.addRemoteTextTrack({});
   this.clock.tick(1);
 
   assert.equal(tech.textTracks().length, 2, 'should have two text tracks at the start');
@@ -312,7 +300,7 @@ QUnit.test('should add the source handler interface to a tech', function(assert)
   const sourceB = { src: 'no-support', type: 'no-support' };
 
   // Define a new tech class
-  const MyTech = extend(Tech);
+  class MyTech extends Tech {}
 
   // Extend Tech with source handlers
   Tech.withSourceHandlers(MyTech);
@@ -512,7 +500,7 @@ QUnit.test('should add the source handler interface to a tech', function(assert)
 
 QUnit.test('should handle unsupported sources with the source handler API', function(assert) {
   // Define a new tech class
-  const MyTech = extend(Tech);
+  class MyTech extends Tech {}
 
   // Extend Tech with source handlers
   Tech.withSourceHandlers(MyTech);
@@ -564,17 +552,17 @@ QUnit.test('should track whether a video has played', function(assert) {
 });
 
 QUnit.test('delegates deferrables to the source handler', function(assert) {
-  const MyTech = extend(Tech, {
+  class MyTech extends Tech {
     seekable() {
       throw new Error('You should not be calling me!');
-    },
+    }
     seeking() {
       throw new Error('You should not be calling me!');
-    },
+    }
     duration() {
       throw new Error('You should not be calling me!');
     }
-  });
+  }
 
   Tech.withSourceHandlers(MyTech);
 
@@ -615,18 +603,19 @@ QUnit.test('delegates deferrables to the source handler', function(assert) {
 
 QUnit.test('delegates only deferred deferrables to the source handler', function(assert) {
   let seekingCount = 0;
-  const MyTech = extend(Tech, {
+
+  class MyTech extends Tech {
     seekable() {
       throw new Error('You should not be calling me!');
-    },
+    }
     seeking() {
       seekingCount++;
       return false;
-    },
+    }
     duration() {
       throw new Error('You should not be calling me!');
     }
-  });
+  }
 
   Tech.withSourceHandlers(MyTech);
 
@@ -663,7 +652,7 @@ QUnit.test('delegates only deferred deferrables to the source handler', function
 QUnit.test('Tech.isTech returns correct answers for techs and components', function(assert) {
   const isTech = Tech.isTech;
   const tech = new Html5({}, {});
-  const button = new Button({}, {});
+  const button = new Button(TestHelpers.makePlayer(), {});
 
   assert.ok(isTech(Tech), 'Tech is a Tech');
   assert.ok(isTech(Html5), 'Html5 is a Tech');
@@ -679,7 +668,7 @@ QUnit.test('Tech.isTech returns correct answers for techs and components', funct
 });
 
 QUnit.test('setSource after tech dispose should dispose source handler once', function(assert) {
-  const MyTech = extend(Tech);
+  class MyTech extends Tech {}
 
   Tech.withSourceHandlers(MyTech);
 
@@ -724,7 +713,7 @@ QUnit.test('setSource after tech dispose should dispose source handler once', fu
 });
 
 QUnit.test('setSource after previous setSource should dispose source handler once', function(assert) {
-  const MyTech = extend(Tech);
+  class MyTech extends Tech {}
 
   Tech.withSourceHandlers(MyTech);
 
@@ -765,5 +754,23 @@ QUnit.test('returns an empty object for getVideoPlaybackQuality', function(asser
   const tech = new Tech();
 
   assert.deepEqual(tech.getVideoPlaybackQuality(), {}, 'returns an empty object');
+  tech.dispose();
+});
+
+QUnit.test('requestVideoFrameCallback waits if tech not ready', function(assert) {
+  const tech = new Tech();
+  const cbSpy = sinon.spy();
+
+  tech.paused = sinon.spy();
+  tech.isReady_ = false;
+
+  tech.requestVideoFrameCallback(cbSpy);
+
+  assert.notOk(tech.paused.called, 'paused not called on tech that is not ready');
+
+  tech.trigger('playing');
+
+  assert.ok(cbSpy.called, 'callback was called on tech playing');
+
   tech.dispose();
 });

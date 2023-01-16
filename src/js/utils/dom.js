@@ -4,9 +4,10 @@
  */
 import document from 'global/document';
 import window from 'global/window';
+import fs from '../fullscreen-api';
 import log from './log.js';
 import {isObject} from './obj';
-import computedStyle from './computed-style';
+import * as browser from './browser';
 
 /**
  * Detect if a value is a string with any non-whitespace characters.
@@ -44,21 +45,6 @@ function throwIfWhitespace(str) {
   if (str.indexOf(' ') >= 0) {
     throw new Error('class has illegal whitespace characters');
   }
-}
-
-/**
- * Produce a regular expression for matching a className within an elements className.
- *
- * @private
- * @param  {string} className
- *         The className to generate the RegExp for.
- *
- * @return {RegExp}
- *         The RegExp that will check for a specific `className` in an elements
- *         className.
- */
-function classRegExp(className) {
-  return new RegExp('(^|\\s)' + className + '($|\\s)');
 }
 
 /**
@@ -152,20 +138,11 @@ export function createEl(tagName = 'div', properties = {}, attributes = {}, cont
   Object.getOwnPropertyNames(properties).forEach(function(propName) {
     const val = properties[propName];
 
-    // See #2176
-    // We originally were accepting both properties and attributes in the
-    // same object, but that doesn't work so well.
-    if (propName.indexOf('aria-') !== -1 || propName === 'role' || propName === 'type') {
-      log.warn('Setting attributes in the second argument of createEl()\n' +
-               'has been deprecated. Use the third argument instead.\n' +
-               `createEl(type, properties, attributes). Attempting to set ${propName} to ${val}.`);
-      el.setAttribute(propName, val);
-
     // Handle textContent since it's not supported everywhere and we have a
     // method for it.
-    } else if (propName === 'textContent') {
+    if (propName === 'textContent') {
       textContent(el, val);
-    } else if (el[propName] !== val) {
+    } else if (el[propName] !== val || propName === 'tabIndex') {
       el[propName] = val;
     }
   });
@@ -236,10 +213,8 @@ export function prependTo(child, parent) {
  */
 export function hasClass(element, classToCheck) {
   throwIfWhitespace(classToCheck);
-  if (element.classList) {
-    return element.classList.contains(classToCheck);
-  }
-  return classRegExp(classToCheck).test(element.className);
+
+  return element.classList.contains(classToCheck);
 }
 
 /**
@@ -248,21 +223,14 @@ export function hasClass(element, classToCheck) {
  * @param  {Element} element
  *         Element to add class name to.
  *
- * @param  {string} classToAdd
- *         Class name to add.
+ * @param  {...string} classesToAdd
+ *         One or more class name to add.
  *
  * @return {Element}
  *         The DOM element with the added class name.
  */
-export function addClass(element, classToAdd) {
-  if (element.classList) {
-    element.classList.add(classToAdd);
-
-  // Don't need to `throwIfWhitespace` here because `hasElClass` will do it
-  // in the case of classList not being supported.
-  } else if (!hasClass(element, classToAdd)) {
-    element.className = (element.className + ' ' + classToAdd).trim();
-  }
+export function addClass(element, ...classesToAdd) {
+  element.classList.add(...classesToAdd.reduce((prev, current) => prev.concat(current.split(/\s+/)), []));
 
   return element;
 }
@@ -273,21 +241,19 @@ export function addClass(element, classToAdd) {
  * @param  {Element} element
  *         Element to remove a class name from.
  *
- * @param  {string} classToRemove
- *         Class name to remove
+ * @param  {...string} classesToRemove
+ *         One or more class name to remove.
  *
  * @return {Element}
  *         The DOM element with class name removed.
  */
-export function removeClass(element, classToRemove) {
-  if (element.classList) {
-    element.classList.remove(classToRemove);
-  } else {
-    throwIfWhitespace(classToRemove);
-    element.className = element.className.split(/\s+/).filter(function(c) {
-      return c !== classToRemove;
-    }).join(' ');
+export function removeClass(element, ...classesToRemove) {
+  // Protect in case the player gets disposed
+  if (!element) {
+    log.warn("removeClass was called with an element that doesn't exist");
+    return null;
   }
+  element.classList.remove(...classesToRemove.reduce((prev, current) => prev.concat(current.split(/\s+/)), []));
 
   return element;
 }
@@ -325,31 +291,13 @@ export function removeClass(element, classToRemove) {
  *         The element with a class that has been toggled.
  */
 export function toggleClass(element, classToToggle, predicate) {
-
-  // This CANNOT use `classList` internally because IE11 does not support the
-  // second parameter to the `classList.toggle()` method! Which is fine because
-  // `classList` will be used by the add/remove functions.
-  const has = hasClass(element, classToToggle);
-
   if (typeof predicate === 'function') {
     predicate = predicate(element, classToToggle);
   }
-
   if (typeof predicate !== 'boolean') {
-    predicate = !has;
+    predicate = undefined;
   }
-
-  // If the necessary class operation matches the current state of the
-  // element, no action is required.
-  if (predicate === has) {
-    return;
-  }
-
-  if (predicate) {
-    addClass(element, classToToggle);
-  } else {
-    removeClass(element, classToToggle);
-  }
+  classToToggle.split(/\s+/).forEach(className => element.classList.toggle(className, predicate));
 
   return element;
 }
@@ -564,12 +512,12 @@ export function findPosition(el) {
   let left = 0;
   let top = 0;
 
-  do {
+  while (el.offsetParent && el !== document[fs.fullscreenElement]) {
     left += el.offsetLeft;
     top += el.offsetTop;
 
     el = el.offsetParent;
-  } while (el);
+  }
 
   return {
     left,
@@ -607,6 +555,33 @@ export function findPosition(el) {
  *
  */
 export function getPointerPosition(el, event) {
+  const translated = {
+    x: 0,
+    y: 0
+  };
+
+  if (browser.IS_IOS) {
+    let item = el;
+
+    while (item && item.nodeName.toLowerCase() !== 'html') {
+      const transform = computedStyle(item, 'transform');
+
+      if (/^matrix/.test(transform)) {
+        const values = transform.slice(7, -1).split(/,\s/).map(Number);
+
+        translated.x += values[4];
+        translated.y += values[5];
+      } else if (/^matrix3d/.test(transform)) {
+        const values = transform.slice(9, -1).split(/,\s/).map(Number);
+
+        translated.x += values[12];
+        translated.y += values[13];
+      }
+
+      item = item.parentNode;
+    }
+  }
+
   const position = {};
   const boxTarget = findPosition(event.target);
   const box = findPosition(el);
@@ -618,9 +593,13 @@ export function getPointerPosition(el, event) {
   if (event.changedTouches) {
     offsetX = event.changedTouches[0].pageX - box.left;
     offsetY = event.changedTouches[0].pageY + box.top;
+    if (browser.IS_IOS) {
+      offsetX -= translated.x;
+      offsetY -= translated.y;
+    }
   }
 
-  position.y = Math.max(0, Math.min(1, (offsetY + boxH) / boxH));
+  position.y = (1 - Math.max(0, Math.min(1, offsetY / boxH)));
   position.x = Math.max(0, Math.min(1, offsetX / boxW));
   return position;
 }
@@ -841,3 +820,38 @@ export const $ = createQuerier('querySelector');
  *
  */
 export const $$ = createQuerier('querySelectorAll');
+
+/**
+ * A safe getComputedStyle.
+ *
+ * This is needed because in Firefox, if the player is loaded in an iframe with
+ * `display:none`, then `getComputedStyle` returns `null`, so, we do a
+ * null-check to make sure that the player doesn't break in these cases.
+ *
+ * @param    {Element} el
+ *           The element you want the computed style of
+ *
+ * @param    {string} prop
+ *           The property name you want
+ *
+ * @see      https://bugzilla.mozilla.org/show_bug.cgi?id=548397
+ */
+export function computedStyle(el, prop) {
+  if (!el || !prop) {
+    return '';
+  }
+
+  if (typeof window.getComputedStyle === 'function') {
+    let computedStyleValue;
+
+    try {
+      computedStyleValue = window.getComputedStyle(el);
+    } catch (e) {
+      return '';
+    }
+
+    return computedStyleValue ? computedStyleValue.getPropertyValue(prop) || computedStyleValue[prop] : '';
+  }
+
+  return '';
+}

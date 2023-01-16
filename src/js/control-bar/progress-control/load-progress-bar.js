@@ -3,7 +3,7 @@
  */
 import Component from '../../component.js';
 import * as Dom from '../../utils/dom.js';
-import clamp from '../../utils/clamp';
+import {clamp} from '../../utils/num';
 import document from 'global/document';
 
 // get the percent width of a time compared to the total end
@@ -28,7 +28,7 @@ class LoadProgressBar extends Component {
   constructor(player, options) {
     super(player, options);
     this.partEls_ = [];
-    this.on(player, 'progress', this.update);
+    this.on(player, 'progress', (e) => this.update(e));
   }
 
   /**

@@ -1,14 +1,17 @@
 /* eslint-env qunit */
 import sinon from 'sinon';
 import evented from '../../../src/js/mixins/evented';
+import DomData from '../../../src/js/utils/dom-data';
 import * as Dom from '../../../src/js/utils/dom';
 import * as Obj from '../../../src/js/utils/obj';
+import * as Events from '../../../src/js/utils/events.js';
 
 // Common errors thrown by evented objects.
 const errors = {
-  type: new Error('Invalid event type; must be a non-empty string or array.'),
-  listener: new Error('Invalid listener; must be a function.'),
-  target: new Error('Invalid target; must be a DOM node or evented object.')
+  type: (objName, fnName) => new Error(`Invalid event type for ${objName}#${fnName}; must be a non-empty string or array.`),
+  listener: (objName, fnName) => new Error(`Invalid listener for ${objName}#${fnName}; must be a function.`),
+  target: (objName, fnName) => new Error(`Invalid target for ${objName}#${fnName}; must be a DOM node or evented object.`),
+  trigger: (objName) => new Error(`Invalid event type for ${objName}#trigger; must be a non-empty string or object with a type key that has a non-empty value.`)
 };
 
 const validateListenerCall = (call, thisValue, eventExpectation) => {
@@ -61,33 +64,76 @@ QUnit.test('evented() with custom element', function(assert) {
   );
 });
 
+QUnit.test('trigger() errors', function(assert) {
+  class Test {}
+  const targeta = evented({});
+  const targetb = evented(new Test());
+  const targetc = evented(new Test());
+
+  targetc.name_ = 'foo';
+
+  [targeta, targetb, targetc].forEach((target) => {
+    const objName = target.name_ || target.constructor.name || typeof target;
+    const triggerError = errors.trigger(objName);
+
+    assert.throws(() => target.trigger(), triggerError, 'expected error');
+    assert.throws(() => target.trigger('   '), triggerError, 'expected error');
+    assert.throws(() => target.trigger({}), triggerError, 'expected error');
+    assert.throws(() => target.trigger({type: ''}), triggerError, 'expected error');
+    assert.throws(() => target.trigger({type: '    '}), triggerError, 'expected error');
+
+    delete target.eventBusEl_;
+
+    assert.throws(() => target.trigger({type: 'foo'}), errors.target(objName, 'trigger'), 'expected error');
+  });
+});
+
 QUnit.test('on(), one(), and any() errors', function(assert) {
+  class Test {}
   const targeta = this.targets.a = evented({});
   const targetb = this.targets.b = evented({});
+  const targetc = this.targets.c = evented(new Test());
+  const targetd = this.targets.d = evented(new Test());
+
+  targetd.name_ = 'foo';
 
   ['on', 'one', 'any'].forEach(method => {
-    assert.throws(() => targeta[method](), errors.type, 'the expected error is thrown');
-    assert.throws(() => targeta[method]('   '), errors.type, 'the expected error is thrown');
-    assert.throws(() => targeta[method]([]), errors.type, 'the expected error is thrown');
-    assert.throws(() => targeta[method]('x'), errors.listener, 'the expected error is thrown');
-    assert.throws(() => targeta[method]({}, 'x', () => {}), errors.target, 'the expected error is thrown');
-    assert.throws(() => targeta[method](targetb, 'x', null), errors.listener, 'the expected error is thrown');
+    [targeta, targetc, targetd].forEach((target) => {
+      const objName = target.name_ || target.constructor.name || typeof target;
+
+      assert.throws(() => target[method](), errors.type(objName, method), 'expected error');
+      assert.throws(() => target[method]('   '), errors.type(objName, method), 'expected error');
+      assert.throws(() => target[method]([]), errors.type(objName, method), 'expected error');
+      assert.throws(() => target[method]('x'), errors.listener(objName, method), 'expected error');
+      assert.throws(() => target[method]({}, 'x', () => {}), errors.target(objName, method), 'expected error');
+      assert.throws(() => target[method](targetb, 'x', null), errors.listener(objName, method), 'expected error');
+    });
   });
 });
 
 QUnit.test('off() errors', function(assert) {
+  class Test {}
   const targeta = this.targets.a = evented({});
   const targetb = this.targets.b = evented({});
   const targetc = this.targets.c = evented({});
   const targetd = this.targets.d = evented({});
+  const targete = this.targets.e = evented(new Test());
+  const targetf = this.targets.f = evented(new Test());
+
+  targetf.name_ = 'foo';
 
   // An invalid event actually causes an invalid target error because it
   // gets passed into code that assumes the first argument is the target.
-  assert.throws(() => targeta.off([]), errors.target, 'the expected error is thrown');
-  assert.throws(() => targeta.off({}, 'x', () => {}), errors.target, 'the expected error is thrown');
-  assert.throws(() => targeta.off(targetb, '', () => {}), errors.type, 'the expected error is thrown');
-  assert.throws(() => targeta.off(targetc, [], () => {}), errors.type, 'the expected error is thrown');
-  assert.throws(() => targeta.off(targetd, 'x', null), errors.listener, 'the expected error is thrown');
+  [targeta, targete, targetf].forEach(function(target) {
+    const objName = target.name_ || target.constructor.name || typeof target;
+
+    assert.throws(() => target.off([]), errors.target(objName, 'off'), 'expected error');
+    assert.throws(() => target.off({}, 'x', () => {}), errors.target(objName, 'off'), 'expected error');
+    assert.throws(() => target.off(targetb, '', () => {}), errors.type(objName, 'off'), 'expected error');
+    assert.throws(() => target.off(targetc, [], () => {}), errors.type(objName, 'off'), 'expected error');
+    assert.throws(() => target.off(targetd, 'x', null), errors.listener(objName, 'off'), 'expected error');
+    assert.throws(() => target.off(targetd, 'x', null), errors.listener(objName, 'off'), 'expected error');
+  });
 });
 
 QUnit.test('on() can add a listener to one event type on this object', function(assert) {
@@ -503,4 +549,32 @@ QUnit.test('off() can remove a listener from an array of events on a different t
     type: 'y',
     target: b.eventBusEl_
   });
+});
+
+QUnit.test('Removes DomData on dispose', function(assert) {
+  const el_ = Dom.createEl('div');
+  const eventBusEl_ = Dom.createEl('span', {className: 'vjs-event-bus'});
+  const target = evented({el_, eventBusEl_}, {eventBusKey: 'eventBusEl_'});
+
+  assert.equal(DomData.get(eventBusEl_).handlers.dispose.length, 1, 'event bus has dispose handler');
+  assert.notOk(DomData.get(target), 'evented obj has no handlers');
+  assert.notOk(DomData.get(el_), 'evented el_ has handlers');
+
+  target.on('foo', () => {});
+
+  assert.equal(DomData.get(eventBusEl_).handlers.foo.length, 1, 'foo handler added to bus');
+
+  Events.on(eventBusEl_, 'bar', () => {});
+  assert.equal(DomData.get(eventBusEl_).handlers.bar.length, 1, 'bar handler added to bus');
+
+  Events.on(el_, 'foo', () => {});
+  assert.equal(DomData.get(el_).handlers.foo.length, 1, 'foo handler added to el_');
+
+  Events.on(target, 'foo', () => {});
+  assert.equal(DomData.get(target).handlers.foo.length, 1, 'foo handler added to evented object');
+
+  target.trigger('dispose');
+  assert.notOk(DomData.get(eventBusEl_), 'eventBusEl_ DomData deleted');
+  assert.notOk(DomData.get(target), 'evented object DomData deleted');
+  assert.notOk(DomData.get(el_), 'el_ DomData deleted');
 });

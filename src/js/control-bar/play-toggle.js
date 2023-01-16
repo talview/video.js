@@ -3,6 +3,7 @@
  */
 import Button from '../button.js';
 import Component from '../component.js';
+import {silencePromise} from '../utils/promise';
 
 /**
  * Button to toggle between play and pause.
@@ -26,11 +27,11 @@ class PlayToggle extends Button {
     // show or hide replay icon
     options.replay = options.replay === undefined || options.replay;
 
-    this.on(player, 'play', this.handlePlay);
-    this.on(player, 'pause', this.handlePause);
+    this.on(player, 'play', (e) => this.handlePlay(e));
+    this.on(player, 'pause', (e) => this.handlePause(e));
 
     if (options.replay) {
-      this.on(player, 'ended', this.handleEnded);
+      this.on(player, 'ended', (e) => this.handleEnded(e));
     }
   }
 
@@ -57,7 +58,7 @@ class PlayToggle extends Button {
    */
   handleClick(event) {
     if (this.player_.paused()) {
-      this.player_.play();
+      silencePromise(this.player_.play());
     } else {
       this.player_.pause();
     }
@@ -91,8 +92,7 @@ class PlayToggle extends Button {
    * @listens Player#play
    */
   handlePlay(event) {
-    this.removeClass('vjs-ended');
-    this.removeClass('vjs-paused');
+    this.removeClass('vjs-ended', 'vjs-paused');
     this.addClass('vjs-playing');
     // change the button text to "Pause"
     this.controlText('Pause');
@@ -128,7 +128,7 @@ class PlayToggle extends Button {
     this.controlText('Replay');
 
     // on the next seek remove the replay button
-    this.one(this.player_, 'seeked', this.handleSeeked);
+    this.one(this.player_, 'seeked', (e) => this.handleSeeked(e));
   }
 }
 
@@ -136,7 +136,7 @@ class PlayToggle extends Button {
  * The text that should display over the `PlayToggle`s controls. Added for localization.
  *
  * @type {string}
- * @private
+ * @protected
  */
 PlayToggle.prototype.controlText_ = 'Play';
 

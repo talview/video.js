@@ -3,7 +3,7 @@
  */
 import Component from '../../component';
 import * as Dom from '../../utils/dom.js';
-import formatTime from '../../utils/format-time.js';
+import {formatTime} from '../../utils/time.js';
 import * as Fn from '../../utils/fn.js';
 
 /**
@@ -24,7 +24,7 @@ class TimeTooltip extends Component {
    */
   constructor(player, options) {
     super(player, options);
-    this.update = Fn.throttle(Fn.bind(this, this.update), Fn.UPDATE_REFRESH_INTERVAL);
+    this.update = Fn.throttle(Fn.bind_(this, this.update), Fn.UPDATE_REFRESH_INTERVAL);
   }
 
   /**
@@ -95,6 +95,12 @@ class TimeTooltip extends Component {
     } else if (pullTooltipBy > tooltipRect.width) {
       pullTooltipBy = tooltipRect.width;
     }
+
+    // prevent small width fluctuations within 0.4px from
+    // changing the value below.
+    // This really helps for live to prevent the play
+    // progress time tooltip from jittering
+    pullTooltipBy = Math.round(pullTooltipBy);
 
     this.el_.style.right = `-${pullTooltipBy}px`;
     this.write(content);

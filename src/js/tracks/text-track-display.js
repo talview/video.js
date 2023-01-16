@@ -99,17 +99,17 @@ class TextTrackDisplay extends Component {
   constructor(player, options, ready) {
     super(player, options, ready);
 
-    const updateDisplayHandler = Fn.bind(this, this.updateDisplay);
+    const updateDisplayHandler = (e) => this.updateDisplay(e);
 
-    player.on('loadstart', Fn.bind(this, this.toggleDisplay));
+    player.on('loadstart', (e) => this.toggleDisplay(e));
     player.on('texttrackchange', updateDisplayHandler);
-    player.on('loadedmetadata', Fn.bind(this, this.preselectTrack));
+    player.on('loadedmetadata', (e) => this.preselectTrack(e));
 
     // This used to be called during player init, but was causing an error
     // if a track should show by default and the display hadn't loaded yet.
     // Should probably be moved to an external track loader when we support
     // tracks that don't need a display.
-    player.ready(Fn.bind(this, function() {
+    player.ready(Fn.bind_(this, function() {
       if (player.tech_ && player.tech_.featuresNativeTextTracks) {
         this.hide();
         return;
@@ -218,6 +218,7 @@ class TextTrackDisplay extends Component {
     return super.createEl('div', {
       className: 'vjs-text-track-display'
     }, {
+      'translate': 'yes',
       'aria-live': 'off',
       'aria-atomic': 'true'
     });
@@ -368,7 +369,6 @@ class TextTrackDisplay extends Component {
         cueDiv.style.fontSize = (fontSize * overrides.fontPercent) + 'px';
         cueDiv.style.height = 'auto';
         cueDiv.style.top = 'auto';
-        cueDiv.style.bottom = '2px';
       }
       if (overrides.fontFamily && overrides.fontFamily !== 'default') {
         if (overrides.fontFamily === 'small-caps') {
@@ -418,8 +418,10 @@ class TextTrackDisplay extends Component {
       for (let j = 0; j < track.activeCues.length; ++j) {
         const cueEl = track.activeCues[j].displayState;
 
-        Dom.addClass(cueEl, 'vjs-text-track-cue');
-        Dom.addClass(cueEl, 'vjs-text-track-cue-' + ((track.language) ? track.language : i));
+        Dom.addClass(cueEl, 'vjs-text-track-cue', 'vjs-text-track-cue-' + ((track.language) ? track.language : i));
+        if (track.language) {
+          Dom.setAttribute(cueEl, 'lang', track.language);
+        }
       }
       if (this.player_.textTrackSettings) {
         this.updateDisplayState(track);

@@ -4,6 +4,8 @@ import window from 'global/window';
 import document from 'global/document';
 import * as Fn from '../../src/js/utils/fn';
 
+QUnit.module('videojs-integration');
+
 /**
  * This test is very important for dom-data memory checking
  * as it runs through a basic player lifecycle for real.
@@ -16,10 +18,10 @@ QUnit.test('create a real player and dispose', function(assert) {
 
   // TODO: remove this code when we have a videojs debug build
   // see https://github.com/videojs/video.js/issues/5858
-  old.bind = Fn.bind;
+  old.bind_ = Fn.bind_;
 
-  Fn.stub_bind(function(context, fn, uid) {
-    const retval = old.bind(context, fn, uid);
+  Fn.stub_bind_(function(context, fn, uid) {
+    const retval = old.bind_(context, fn, uid);
 
     retval.og_ = fn.og_ || fn;
     retval.cx_ = fn.cx_ || context;
@@ -74,11 +76,14 @@ QUnit.test('create a real player and dispose', function(assert) {
     assert.ok(player.tech_, 'tech exists');
     assert.equal(player.textTracks().length, 1, 'should have one text track');
 
-    player.dispose();
+    // only dispose after a timeout
+    player.setTimeout(() => {
+      player.dispose();
 
-    Object.keys(old).forEach(function(k) {
-      Fn[`stub_${k}`](old[k]);
-    });
-    done();
+      Object.keys(old).forEach(function(k) {
+        Fn[`stub_${k}`](old[k]);
+      });
+      done();
+    }, 100);
   }, true);
 });

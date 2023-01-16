@@ -3,10 +3,8 @@
  */
 import ClickableComponent from './clickable-component.js';
 import Component from './component.js';
-import * as Fn from './utils/fn.js';
 import * as Dom from './utils/dom.js';
 import {silencePromise} from './utils/promise';
-import * as browser from './utils/browser.js';
 
 /**
  * A `ClickableComponent` that handles showing the poster image for the player.
@@ -28,14 +26,16 @@ class PosterImage extends ClickableComponent {
     super(player, options);
 
     this.update();
-    player.on('posterchange', Fn.bind(this, this.update));
+
+    this.update_ = (e) => this.update(e);
+    player.on('posterchange', this.update_);
   }
 
   /**
    * Clean up and dispose of the `PosterImage`.
    */
   dispose() {
-    this.player().off('posterchange', this.update);
+    this.player().off('posterchange', this.update_);
     super.dispose();
   }
 
@@ -46,14 +46,54 @@ class PosterImage extends ClickableComponent {
    *         The element that gets created.
    */
   createEl() {
-    const el = Dom.createEl('div', {
+    const el = Dom.createEl('picture', {
       className: 'vjs-poster',
 
       // Don't want poster to be tabbable.
       tabIndex: -1
-    });
+    }, {}, Dom.createEl('img', {
+      loading: 'lazy',
+      crossOrigin: this.crossOrigin()
+    }));
 
     return el;
+  }
+
+  /**
+   * Get or set the `PosterImage`'s crossOrigin option.
+   *
+   * @param {string|null} [value]
+   *        The value to set the crossOrigin to. If an argument is
+   *        given, must be one of `'anonymous'` or `'use-credentials'`, or 'null'.
+   *
+   * @return {string|null}
+   *         - The current crossOrigin value of the `Player` when getting.
+   *         - undefined when setting
+   */
+  crossOrigin(value) {
+    // `null` can be set to unset a value
+    if (typeof value === 'undefined') {
+      if (this.el_) {
+        // If the poster's element exists, give its value
+        return this.el_.querySelector('img').crossOrigin;
+      } else if (this.player_.tech_ && this.player_.tech_.isReady_) {
+        // If not but the tech is ready, query the tech
+        return this.player_.crossOrigin();
+      }
+      // Otherwise check options as the  poster is usually set before the state of crossorigin
+      // can be retrieved by the getter
+      return this.player_.options_.crossOrigin || this.player_.options_.crossorigin || null;
+
+    }
+
+    if (value !== null && value !== 'anonymous' && value !== 'use-credentials') {
+      this.player_.log.warn(`crossOrigin must be null,  "anonymous" or "use-credentials", given "${value}"`);
+      return;
+    }
+
+    this.el_.querySelector('img').crossOrigin = value;
+
+    return;
   }
 
   /**
@@ -85,15 +125,7 @@ class PosterImage extends ClickableComponent {
    *        The URL to the source for the `PosterImage`.
    */
   setSrc(url) {
-    let backgroundImage = '';
-
-    // Any falsy value should stay as an empty string, otherwise
-    // this will throw an extra error
-    if (url) {
-      backgroundImage = `url("${url}")`;
-    }
-
-    this.el_.style.backgroundImage = backgroundImage;
+    this.el_.querySelector('img').src = url;
   }
 
   /**
@@ -113,15 +145,7 @@ class PosterImage extends ClickableComponent {
       return;
     }
 
-    const sourceIsEncrypted = this.player_.usingPlugin('eme') &&
-                                this.player_.eme.sessions &&
-                                this.player_.eme.sessions.length > 0;
-
-    if (this.player_.tech(true) &&
-    // We've observed a bug in IE and Edge when playing back DRM content where
-    // calling .focus() on the video element causes the video to go black,
-    // so we avoid it in that specific case
-    !((browser.IE_VERSION || browser.IS_EDGE) && sourceIsEncrypted)) {
+    if (this.player_.tech(true)) {
       this.player_.tech(true).focus();
     }
 
@@ -133,6 +157,21 @@ class PosterImage extends ClickableComponent {
   }
 
 }
+
+/**
+ * Get or set the `PosterImage`'s crossorigin option. For the HTML5 player, this
+ * sets the `crossOrigin` property on the `<img>` tag to control the CORS
+ * behavior.
+ *
+ * @param {string|null} [value]
+ *        The value to set the `PosterImages`'s crossorigin to. If an argument is
+ *        given, must be one of `anonymous` or `use-credentials`.
+ *
+ * @return {string|null|undefined}
+ *         - The current crossorigin value of the `Player` when getting.
+ *         - undefined when setting
+ */
+PosterImage.prototype.crossorigin = PosterImage.prototype.crossOrigin;
 
 Component.registerComponent('PosterImage', PosterImage);
 export default PosterImage;

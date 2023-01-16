@@ -3,18 +3,18 @@
  */
 
 import Component from '../component';
-import mergeOptions from '../utils/merge-options.js';
 import * as Fn from '../utils/fn.js';
 import log from '../utils/log.js';
-import { createTimeRange } from '../utils/time-ranges.js';
+import { createTimeRange } from '../utils/time.js';
 import { bufferedPercent } from '../utils/buffer.js';
 import MediaError from '../media-error.js';
 import window from 'global/window';
 import document from 'global/document';
-import {isPlain} from '../utils/obj';
+import {isPlain, merge} from '../utils/obj';
 import * as TRACK_TYPES from '../tracks/track-types';
-import {toTitleCase, toLowerCase} from '../utils/string-cases.js';
+import {toTitleCase, toLowerCase} from '../utils/str.js';
 import vtt from 'videojs-vtt.js';
+import * as Guid from '../utils/guid.js';
 
 /**
  * An Object containing a structure like: `{src: 'url', type: 'mimetype'}` or string
@@ -76,7 +76,7 @@ function createTrackHelper(self, kind, label, language, options = {}) {
 
 /**
  * This is the base class for media playback technology controllers, such as
- * {@link Flash} and {@link HTML5}
+ * {@link HTML5}
  *
  * @extends Component
  */
@@ -88,7 +88,7 @@ class Tech extends Component {
   * @param {Object} [options]
   *        The key/value store of player options.
   *
-  * @param {Component~ReadyCallback} ready
+  * @param {Component~ReadyCallback} [ready]
   *        Callback function to call when the `HTML5` Tech is ready.
   */
   constructor(options = {}, ready = function() {}) {
@@ -96,6 +96,14 @@ class Tech extends Component {
     // This is done manually in addControlsListeners
     options.reportTouchActivity = false;
     super(null, options, ready);
+
+    this.onDurationChange_ = (e) => this.onDurationChange(e);
+    this.trackProgress_ = (e) => this.trackProgress(e);
+    this.trackCurrentTime_ = (e) => this.trackCurrentTime(e);
+    this.stopTrackingCurrentTime_ = (e) => this.stopTrackingCurrentTime(e);
+    this.disposeSourceHandler_ = (e) => this.disposeSourceHandler(e);
+
+    this.queuedHanders_ = new Set();
 
     // keep track of whether the current source has played at all to
     // implement a very limited played()
@@ -115,12 +123,12 @@ class Tech extends Component {
       }
     });
 
-    // Manually track progress in cases where the browser/flash player doesn't report it.
+    // Manually track progress in cases where the browser/tech doesn't report it.
     if (!this.featuresProgressEvents) {
       this.manualProgressOn();
     }
 
-    // Manually track timeupdates in cases where the browser/flash player doesn't report it.
+    // Manually track timeupdates in cases where the browser/tech doesn't report it.
     if (!this.featuresTimeupdateEvents) {
       this.manualTimeUpdatesOn();
     }
@@ -194,12 +202,12 @@ class Tech extends Component {
    * @see {@link Tech#trackProgress}
    */
   manualProgressOn() {
-    this.on('durationchange', this.onDurationChange);
+    this.on('durationchange', this.onDurationChange_);
 
     this.manualProgress = true;
 
     // Trigger progress watching when a source begins loading
-    this.one('ready', this.trackProgress);
+    this.one('ready', this.trackProgress_);
   }
 
   /**
@@ -210,7 +218,7 @@ class Tech extends Component {
     this.manualProgress = false;
     this.stopTrackingProgress();
 
-    this.off('durationchange', this.onDurationChange);
+    this.off('durationchange', this.onDurationChange_);
   }
 
   /**
@@ -228,7 +236,7 @@ class Tech extends Component {
    */
   trackProgress(event) {
     this.stopTrackingProgress();
-    this.progressInterval = this.setInterval(Fn.bind(this, function() {
+    this.progressInterval = this.setInterval(Fn.bind_(this, function() {
       // Don't trigger unless buffered amount is greater than last time
 
       const numBufferedPercent = this.bufferedPercent();
@@ -304,8 +312,8 @@ class Tech extends Component {
   manualTimeUpdatesOn() {
     this.manualTimeUpdates = true;
 
-    this.on('play', this.trackCurrentTime);
-    this.on('pause', this.stopTrackingCurrentTime);
+    this.on('play', this.trackCurrentTime_);
+    this.on('pause', this.stopTrackingCurrentTime_);
   }
 
   /**
@@ -315,8 +323,8 @@ class Tech extends Component {
   manualTimeUpdatesOff() {
     this.manualTimeUpdates = false;
     this.stopTrackingCurrentTime();
-    this.off('play', this.trackCurrentTime);
-    this.off('pause', this.stopTrackingCurrentTime);
+    this.off('play', this.trackCurrentTime_);
+    this.off('pause', this.stopTrackingCurrentTime_);
   }
 
   /**
@@ -484,6 +492,15 @@ class Tech extends Component {
   }
 
   /**
+   * Start playback
+   *
+   * @abstract
+   *
+   * @see {Html5#play}
+   */
+  play() {}
+
+  /**
    * Set whether we are scrubbing or not
    *
    * @abstract
@@ -491,6 +508,15 @@ class Tech extends Component {
    * @see {Html5#setScrubbing}
    */
   setScrubbing() {}
+
+  /**
+   * Get whether we are scrubbing or not
+   *
+   * @abstract
+   *
+   * @see {Html5#scrubbing}
+   */
+  scrubbing() {}
 
   /**
    * Causes a manual time update to occur if {@link Tech#manualTimeUpdatesOn} was
@@ -716,7 +742,7 @@ class Tech extends Component {
    *         The track element that gets created.
    */
   createRemoteTextTrack(options) {
-    const track = mergeOptions(options, {
+    const track = merge(options, {
       tech: this
     });
 
@@ -731,7 +757,7 @@ class Tech extends Component {
    * @param {Object} options
    *        See {@link Tech#createRemoteTextTrack} for more detailed properties.
    *
-   * @param {boolean} [manualCleanup=true]
+   * @param {boolean} [manualCleanup=false]
    *        - When false: the TextTrack will be automatically removed from the video
    *          element whenever the source changes
    *        - When True: The TextTrack will have to be cleaned up manually
@@ -739,24 +765,19 @@ class Tech extends Component {
    * @return {HTMLTrackElement}
    *         An Html Track Element.
    *
-   * @deprecated The default functionality for this function will be equivalent
-   *             to "manualCleanup=false" in the future. The manualCleanup parameter will
-   *             also be removed.
    */
   addRemoteTextTrack(options = {}, manualCleanup) {
     const htmlTrackElement = this.createRemoteTextTrack(options);
 
-    if (manualCleanup !== true && manualCleanup !== false) {
-      // deprecation warning
-      log.warn('Calling addRemoteTextTrack without explicitly setting the "manualCleanup" parameter to `true` is deprecated and default to `false` in future version of video.js');
-      manualCleanup = true;
+    if (typeof manualCleanup !== 'boolean') {
+      manualCleanup = false;
     }
 
     // store HTMLTrackElement and TextTrack to remote list
     this.remoteTextTrackEls().addTrackElement_(htmlTrackElement);
     this.remoteTextTracks().addTrack(htmlTrackElement.track);
 
-    if (manualCleanup !== true) {
+    if (manualCleanup === false) {
       // create the TextTrackList if it doesn't exist
       this.ready(() => this.autoRemoteTextTracks_.addTrack(htmlTrackElement.track));
     }
@@ -809,11 +830,7 @@ class Tech extends Component {
    * @abstract
    */
   requestPictureInPicture() {
-    const PromiseClass = this.options_.Promise || window.Promise;
-
-    if (PromiseClass) {
-      return PromiseClass.reject();
-    }
+    return Promise.reject();
   }
 
   /**
@@ -832,6 +849,43 @@ class Tech extends Component {
    * @abstract
    */
   setDisablePictureInPicture() {}
+
+  /**
+   * A fallback implementation of requestVideoFrameCallback using requestAnimationFrame
+   *
+   * @param {function} cb
+   * @return {number} request id
+   */
+  requestVideoFrameCallback(cb) {
+    const id = Guid.newGUID();
+
+    if (!this.isReady_ || this.paused()) {
+      this.queuedHanders_.add(id);
+      this.one('playing', () => {
+        if (this.queuedHanders_.has(id)) {
+          this.queuedHanders_.delete(id);
+          cb();
+        }
+      });
+    } else {
+      this.requestNamedAnimationFrame(id, cb);
+    }
+
+    return id;
+  }
+
+  /**
+   * A fallback implementation of cancelVideoFrameCallback
+   *
+   * @param {number} id id of callback to be cancelled
+   */
+  cancelVideoFrameCallback(id) {
+    if (this.queuedHanders_.has(id)) {
+      this.queuedHanders_.delete(id);
+    } else {
+      this.cancelNamedAnimationFrame(id);
+    }
+  }
 
   /**
    * A method to set a poster from a `Tech`.
@@ -1107,9 +1161,8 @@ Tech.prototype.featuresFullscreenResize = false;
 Tech.prototype.featuresPlaybackRate = false;
 
 /**
- * Boolean indicating whether the `Tech` supports the `progress` event. This is currently
- * not triggered by video-js-swf. This will be used to determine if
- * {@link Tech#manualProgressOn} should be called.
+ * Boolean indicating whether the `Tech` supports the `progress` event.
+ * This will be used to determine if {@link Tech#manualProgressOn} should be called.
  *
  * @type {boolean}
  * @default
@@ -1129,9 +1182,8 @@ Tech.prototype.featuresProgressEvents = false;
 Tech.prototype.featuresSourceset = false;
 
 /**
- * Boolean indicating whether the `Tech` supports the `timeupdate` event. This is currently
- * not triggered by video-js-swf. This will be used to determine if
- * {@link Tech#manualTimeUpdates} should be called.
+ * Boolean indicating whether the `Tech` supports the `timeupdate` event.
+ * This will be used to determine if {@link Tech#manualTimeUpdates} should be called.
  *
  * @type {boolean}
  * @default
@@ -1146,6 +1198,14 @@ Tech.prototype.featuresTimeupdateEvents = false;
  * @default
  */
 Tech.prototype.featuresNativeTextTracks = false;
+
+/**
+ * Boolean indicating whether the `Tech` supports `requestVideoFrameCallback`.
+ *
+ * @type {boolean}
+ * @default
+ */
+Tech.prototype.featuresVideoFrameCallback = false;
 
 /**
  * A functional mixin for techs that want to use the Source Handler pattern.
@@ -1324,14 +1384,14 @@ Tech.withSourceHandlers = function(_Tech) {
 
     // Dispose any existing source handler
     this.disposeSourceHandler();
-    this.off('dispose', this.disposeSourceHandler);
+    this.off('dispose', this.disposeSourceHandler_);
 
     if (sh !== _Tech.nativeSourceHandler) {
       this.currentSource_ = source;
     }
 
     this.sourceHandler_ = sh.handleSource(source, this, this.options_);
-    this.one('dispose', this.disposeSourceHandler);
+    this.one('dispose', this.disposeSourceHandler_);
   };
 
   /**

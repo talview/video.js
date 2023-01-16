@@ -4,7 +4,7 @@
 import TextTrackButton from './text-track-button.js';
 import Component from '../../component.js';
 import ChaptersTrackMenuItem from './chapters-track-menu-item.js';
-import {toTitleCase} from '../../utils/string-cases.js';
+import {toTitleCase} from '../../utils/str.js';
 
 /**
  * The button component for toggling and selecting chapters
@@ -29,6 +29,12 @@ class ChaptersButton extends TextTrackButton {
    */
   constructor(player, options, ready) {
     super(player, options, ready);
+
+    this.selectCurrentItem_ = () => {
+      this.items.forEach(item => {
+        item.selected(this.track_.activeCues[0] === item.cue);
+      });
+    };
   }
 
   /**
@@ -56,10 +62,19 @@ class ChaptersButton extends TextTrackButton {
    * @listens TextTrackList#change
    */
   update(event) {
-    if (!this.track_ || (event && (event.type === 'addtrack' || event.type === 'removetrack'))) {
-      this.setTrack(this.findChaptersTrack());
+    if (event && event.track && event.track.kind !== 'chapters') {
+      return;
     }
-    super.update();
+
+    const track = this.findChaptersTrack();
+
+    if (track !== this.track_) {
+      this.setTrack(track);
+      super.update();
+    } else if (!this.items || (track && track.cues && track.cues.length !== this.items.length)) {
+      // Update the menu initially or if the number of cues has changed since set
+      super.update();
+    }
   }
 
   /**
@@ -86,6 +101,8 @@ class ChaptersButton extends TextTrackButton {
         remoteTextTrackEl.removeEventListener('load', this.updateHandler_);
       }
 
+      this.track_.removeEventListener('cuechange', this.selectCurrentItem_);
+
       this.track_ = null;
     }
 
@@ -100,6 +117,8 @@ class ChaptersButton extends TextTrackButton {
       if (remoteTextTrackEl) {
         remoteTextTrackEl.addEventListener('load', this.updateHandler_);
       }
+
+      this.track_.addEventListener('cuechange', this.selectCurrentItem_);
     }
   }
 
@@ -175,6 +194,7 @@ class ChaptersButton extends TextTrackButton {
 
     return items;
   }
+
 }
 
 /**
@@ -189,7 +209,7 @@ ChaptersButton.prototype.kind_ = 'chapters';
  * The text that should display over the `ChaptersButton`s controls. Added for localization.
  *
  * @type {string}
- * @private
+ * @protected
  */
 ChaptersButton.prototype.controlText_ = 'Chapters';
 
